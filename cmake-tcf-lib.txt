@@ -1,0 +1,134 @@
+# -*- cmake -*-
+
+set(default_opsys ${CMAKE_SYSTEM_NAME})
+if(default_opsys MATCHES "Linux|Android")
+  set(default_opsys GNU/Linux)
+endif()
+
+set(default_machine ${CMAKE_SYSTEM_PROCESSOR})
+if(default_machine MATCHES "^(amd64|AMD64)$")
+  set(default_machine x86_64)
+elseif(default_machine MATCHES "^(armv6l|armv7l|armv7-a)$")
+  set(default_machine arm)
+elseif(default_machine STREQUAL "ppc64")
+  set(default_machine powerpc)
+elseif(default_machine STREQUAL "aarch64")
+  set(default_machine a64)
+endif()
+
+set(TCF_MACHINE ${default_machine} CACHE STRING "TCF machine")
+set(TCF_OPSYS ${default_opsys} CACHE STRING "TCF operating system")
+
+if (NOT TCF_DIR)
+   set(TCF_DIR ${CMAKE_CURRENT_LIST_DIR})
+endif()
+
+if (NOT TCF_LIB_NAME)
+   set(TCF_LIB_NAME tcf)
+endif()
+
+set(TCF_BASE_DIR ${TCF_DIR}/agent)
+
+# sources to build
+set(TCF_SRCS)
+
+# get all regular source files
+file(GLOB TCF_SRCS_REL RELATIVE ${TCF_BASE_DIR}
+	${TCF_BASE_DIR}/system/${TCF_OPSYS}/tcf/*.c
+	${TCF_BASE_DIR}/machine/${TCF_MACHINE}/tcf/*.c
+	${TCF_BASE_DIR}/tcf/framework/*.c
+	${TCF_BASE_DIR}/tcf/services/*.c
+	${TCF_BASE_DIR}/tcf/main/*.c
+	${TCF_BASE_DIR}/tcf/http/*.c)
+
+# remove non-library files
+file(GLOB TCF_MAIN_REL RELATIVE ${TCF_BASE_DIR}
+	${TCF_BASE_DIR}/tcf/main/main*.c)
+list(REMOVE_ITEM TCF_SRCS_REL ${TCF_MAIN_REL})
+
+if(DEFINED TCF_EXTRA_DIR)
+  foreach(extraDir ${TCF_EXTRA_DIR})
+    # get extra all source files
+    file(GLOB_RECURSE TCF_EXTRA_SRCS_REL RELATIVE ${extraDir}
+      ${extraDir}/system/${TCF_OPSYS}/tcf/*.c
+      ${extraDir}/machine/${TCF_MACHINE}/tcf/*.c
+      ${extraDir}/tcf/framework/*.c
+      ${extraDir}/tcf/services/*.c
+      ${extraDir}/tcf/main/*.c
+      ${extraDir}/tcf/http/*.c)
+
+    # Override regular files with extra files
+    list (LENGTH TCF_EXTRA_SRCS_REL LEN_TCF_EXTRA_SRCS_REL)
+
+    if (NOT LEN_TCF_EXTRA_SRCS_REL EQUAL 0)
+      list(REMOVE_ITEM TCF_SRCS_REL ${TCF_EXTRA_SRCS_REL})
+    endif ()
+    
+    foreach(file ${TCF_EXTRA_SRCS_REL})
+      list(APPEND TCF_SRCS ${extraDir}/${file})
+    endforeach(file)
+  endforeach(extraDir)
+endif()
+
+foreach(file ${TCF_SRCS_REL})
+  list(APPEND TCF_SRCS ${TCF_BASE_DIR}/${file})
+endforeach(file)
+
+if(DEFINED TCF_EXTRA_DIR)
+  foreach(extraDir ${TCF_EXTRA_DIR})
+    include_directories(${extraDir} ${extraDir}/system/${TCF_OPSYS} ${extraDir}/machine/${TCF_MACHINE})
+  endforeach(extraDir)
+endif()
+
+include_directories(${TCF_BASE_DIR} ${TCF_BASE_DIR}/system/${TCF_OPSYS} ${TCF_BASE_DIR}/machine/${TCF_MACHINE})
+
+add_library(${TCF_LIB_NAME} ${TCF_LIB_TYPE} ${TCF_SRCS})
+find_package(Threads)
+target_link_libraries(${TCF_LIB_NAME} Threads::Threads)
+find_library(LIBRT rt)
+if(LIBRT)
+  target_link_libraries(${TCF_LIB_NAME} ${LIBRT})
+endif()
+find_library(LIBUUID uuid)
+if(LIBUUID)
+  target_link_libraries(${TCF_LIB_NAME} ${LIBUUID})
+else()
+  target_compile_definitions(${TCF_LIB_NAME} PUBLIC USE_uuid_generate=0)
+endif()
+if(WIN32)
+  target_link_libraries(${TCF_LIB_NAME} version.lib psapi.lib ws2_32 iphlpapi)
+endif()
+if(ANDROID)
+  find_library(LIBLOG log)
+  target_link_libraries(${TCF_LIB_NAME} ${LIBLOG})
+endif()
+if(SSL_LIB_NAME)
+  target_link_libraries(${TCF_LIB_NAME} ${SSL_LIB_NAME})
+else()
+  add_definitions("-DENABLE_SSL=0")
+endif()
+
+if(DEFINED TCF_PLUGIN_PATH)
+  add_definitions(-DPATH_Plugins=${TCF_PLUGIN_PATH})
+  if (UNIX)
+    target_link_libraries(${TCF_LIB_NAME} dl)
+  endif()
+endif()
+
+if (LIBWEBSOCKETSDIR)
+  find_library(LIBWEBSOCKETS NAME "websockets" PATHS ${LIBWEBSOCKETSDIR}/lib NO_DEFAULT_PATH)
+  if (${LIBWEBSOCKETS} STREQUAL "LIBWEBSOCKETS-NOTFOUND")
+    message(FATAL_ERROR "ERROR: Could not find libwebsockets library in directory: " ${LIBWEBSOCKETSDIR})
+  else()
+    message(STATUS "Found libwebsockets library: ${LIBWEBSOCKETS}")
+  endif()
+  include_directories(${LIBWEBSOCKETSDIR}/include/)
+  target_link_libraries(${TCF_LIB_NAME} ${LIBWEBSOCKETS})
+  add_definitions("-DENABLE_LibWebSockets=1")
+  INCLUDE (${CMAKE_ROOT}/Modules/FindOpenSSL.cmake)
+  if (NOT OPENSSL_FOUND)
+    message(FATAL_ERROR "ERROR: Could not find OpenSSL!!!")
+  endif(NOT OPENSSL_FOUND)
+  include_directories(${OPENSSL_INCLUDE_DIR})
+  target_link_libraries(${TCF_LIB_NAME} ${OPENSSL_LIBRARIES})
+endif()

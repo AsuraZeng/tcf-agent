@@ -8,7 +8,7 @@ set(CMAKE_COLOR_MAKEFILE OFF)
 
 set(TCF_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(TCF_LIB_NAME tcf-agent)
-include(../cmake-tcf-lib.txt)
+include(cmake-tcf-lib.txt)
 
 message(STATUS "operating system: " ${TCF_OPSYS})
 message(STATUS "machine: " ${TCF_MACHINE})
